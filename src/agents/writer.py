@@ -13,6 +13,10 @@ from src.database import database
 from src.prompt import SUBSECTION_WRITING_PROMPT, LCE_PROMPT, CHECK_CITATION_PROMPT
 from transformers import AutoModel, AutoTokenizer,  AutoModelForSequenceClassification
 
+import logging
+
+max_threads = 5 # limit threads to have stable API accesses
+
 class subsectionWriter():
     
     def __init__(self, model:str, api_key:str, api_url:str,  database) -> None:
@@ -25,6 +29,7 @@ class subsectionWriter():
         self.input_token_usage, self.output_token_usage = 0, 0
 
     def write(self, topic, outline, rag_num = 30, subsection_len = 500, refining = True, reflection=True):
+        logging.info(f"Starting subsection writing for topic: {topic}, using rag_num={rag_num}, section_len={subsection_len}")
         # Get database
         parsed_outline = self.parse_outline(outline=outline)
         section_content = [[]] * len(parsed_outline['sections'])
@@ -56,15 +61,30 @@ class subsectionWriter():
                 section_paper_texts[i].append(paper_texts)
 
         thread_l = []
+
+        logging.info(f"Multi-threaded writing subsections of section count = {len(parsed_outline['sections'])} ....")
+
         for i in range(len(parsed_outline['sections'])):
+
+            # Wait for a thread to finish if the maximum number is reached
+            while len(thread_l) >= max_threads:
+                for t in thread_l:
+                    if not t.is_alive():
+                        thread_l.remove(t)
+                time.sleep(0.2)  # Short delay to avoid busy-waiting
+
             thread = threading.Thread(target=self.write_subsection_with_reflection, args=(section_paper_texts[i], topic, outline, parsed_outline['sections'][i], parsed_outline['subsections'][i], parsed_outline['subsection_descriptions'][i], section_content, i, rag_num,str(subsection_len)))
             thread_l.append(thread)
             thread.start()
             time.sleep(0.1)
+
         for thread in thread_l:
             thread.join()
+
         raw_survey = self.generate_document(parsed_outline, section_content)
+
         raw_survey_with_references, raw_references = self.process_references(raw_survey)
+
         if refining:
             final_section_content = self.refine_subsections(topic, outline, section_content)
             refined_survey = self.generate_document(parsed_outline, final_section_content)
@@ -77,6 +97,9 @@ class subsectionWriter():
         return self.token_counter.compute_price(input_tokens=self.input_token_usage, output_tokens=self.output_token_usage, model=self.model)
 
     def refine_subsections(self, topic, outline, section_content):
+        logging.info(f"Refining subsections .....")
+        print("Refining subsections .....")
+
         section_content_even = copy.deepcopy(section_content)
         
         thread_l = []
@@ -116,6 +139,7 @@ class subsectionWriter():
 
     def write_subsection_with_reflection(self, paper_texts_l, topic, outline, section, subsections, subdescriptions, res_l, idx, rag_num = 20, subsection_len = 1000, citation_num = 8):
         
+        logging.info(f"write_subsection_with_reflection  subsection count = {len(subsections)} idx ={idx}....")
         prompts = []
         for j in range(len(subsections)):
             subsection = subsections[j]
@@ -127,6 +151,7 @@ class subsectionWriter():
             prompts.append(prompt)
 
         self.input_token_usage += self.token_counter.num_tokens_from_list_string(prompts)
+
         contents = self.api_model.batch_chat(prompts, temperature=1)
         self.output_token_usage += self.token_counter.num_tokens_from_list_string(contents)
         contents = [c.replace('<format>','').replace('</format>','') for c in contents]
@@ -135,7 +160,9 @@ class subsectionWriter():
         for content, paper_texts in zip(contents, paper_texts_l):
             prompts.append(self.__generate_prompt(CHECK_CITATION_PROMPT, paras={'SUBSECTION': content, 'TOPIC':topic, 'PAPER LIST':paper_texts}))
         self.input_token_usage += self.token_counter.num_tokens_from_list_string(prompts)
+
         contents = self.api_model.batch_chat(prompts, temperature=1)
+
         self.output_token_usage += self.token_counter.num_tokens_from_list_string(contents)
         contents = [c.replace('<format>','').replace('</format>','') for c in contents]
     

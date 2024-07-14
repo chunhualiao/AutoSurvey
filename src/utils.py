@@ -9,6 +9,12 @@ import random
 import json
 from langchain.document_loaders import PyPDFLoader
 
+import logging
+
+logging.basicConfig(filename='outline_writer.log', 
+                    level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
 class tokenCounter():
 
     def __init__(self) -> None:
@@ -21,7 +27,13 @@ class tokenCounter():
     def num_tokens_from_list_string(self, list_of_string:List[str]) -> int:
         num = 0
         for s in list_of_string:
-            num += len(self.encoding.encode(s))
+            if isinstance(s, str):
+                num += len(self.encoding.encode(s))
+            else:
+                # Handle the error: Log the error and raise an exception
+                error_message = f"Error: Expected string, but got {type(s)}: {s}"
+                logging.error(error_message)
+                raise TypeError(error_message)  
         return num
     
     def compute_price(self, input_tokens, output_tokens, model):
