@@ -36,6 +36,7 @@ class APIModel:
 #                except:
 #                    pass
 #            return None
+        wait =0.2
         for _ in range(max_try):
             try:
                 response = requests.request("POST", url, headers=headers, data=payload)
@@ -64,7 +65,8 @@ class APIModel:
             except json.JSONDecodeError as e:
                 logging.error(f"JSON decode error: {e}, Retry attempt: {_ + 1}")
 
-            time.sleep(0.2) # Short delay before trying next time
+            time.sleep(wait) # Short delay before trying next time
+            wait = wait *2.0 # double waiting duration
 
         # If all retries fail
         logging.error("All API request retries failed.")
