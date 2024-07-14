@@ -33,7 +33,7 @@ class tokenCounter():
                 # Handle the error: Log the error and raise an exception
                 error_message = f"Error: Expected string, but got {type(s)}: {s}"
                 logging.error(error_message)
-                raise TypeError(error_message)  
+                # raise TypeError(error_message) # do nothing 
         return num
     
     def compute_price(self, input_tokens, output_tokens, model):
