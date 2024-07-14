@@ -4,11 +4,19 @@ import tiktoken
 from tqdm import trange,tqdm
 import time
 import torch
+
 from src.model import APIModel
 from src.database import database
 from src.utils import tokenCounter
 from src.prompt import ROUGH_OUTLINE_PROMPT, MERGING_OUTLINE_PROMPT, SUBSECTION_OUTLINE_PROMPT, EDIT_FINAL_OUTLINE_PROMPT
 from transformers import AutoModel, AutoTokenizer,  AutoModelForSequenceClassification
+
+import logging
+import inspect
+
+logging.basicConfig(filename='outline_writer.log', 
+                    level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 class outlineWriter():
     
@@ -22,16 +30,24 @@ class outlineWriter():
         self.input_token_usage, self.output_token_usage = 0, 0
 
     def draft_outline(self, topic, reference_num = 600, chunk_size = 30000, section_num = 6):
+        logging.info(f"Starting outline generation for topic: {topic}, using ref_num={reference_num}, chunk_size={chunk_size}, section_num={section_num}")
+
         # Get database
         references_ids = self.db.get_ids_from_query(topic, num = reference_num, shuffle = True)
+
+        logging.info(f"Retrieved {len(references_ids)} relevant paper IDs from the database.")
+
         references_infos = self.db.get_paper_info_from_ids(references_ids)
 
         references_titles = [r['title'] for r in references_infos]
         references_abs = [r['abs'] for r in references_infos]
         abs_chunks, titles_chunks = self.chunking(references_abs, references_titles, chunk_size=chunk_size)
 
+        logging.info(f"chunking resuls: {len(abs_chunks)} abstract chunks {len(titles_chunks)} title chunks.")
+
         # generate rough section-level outline
         outlines = self.generate_rough_outlines(topic=topic, papers_chunks = abs_chunks, titles_chunks = titles_chunks, section_num=section_num)
+        logging.info(f"Generating rough outlines for {len(abs_chunks)} abstract chunks.")
         
         # merge outline
         section_outline = self.merge_outlines(topic=topic, outlines=outlines)
@@ -68,6 +84,8 @@ class outlineWriter():
         return self.token_counter.compute_price(input_tokens=self.input_token_usage, output_tokens=self.output_token_usage, model=self.model)
 
     def generate_rough_outlines(self, topic, papers_chunks, titles_chunks, section_num = 8):
+        logging.info(f"Generating rough outlines for {len(papers_chunks)} chunks.")
+
         '''
         You wants to write a overall and comprehensive academic survey about "[TOPIC]".\n\
         You are provided with a list of papers related to the topic below:\n\
@@ -108,12 +126,16 @@ class outlineWriter():
 
             prompt = self.__generate_prompt(ROUGH_OUTLINE_PROMPT, paras={'PAPER LIST': paper_texts, 'TOPIC': topic, 'SECTION NUM': str(section_num)})
             prompts.append(prompt)
+
         self.input_token_usage += self.token_counter.num_tokens_from_list_string(prompts)
+
+        logging.info(f"entering batch chat api model") 
         outlines = self.api_model.batch_chat(text_batch=prompts, temperature=1)
         self.output_token_usage += self.token_counter.num_tokens_from_list_string(outlines)
         return outlines
     
     def merge_outlines(self, topic, outlines):
+        logging.info("Merging rough outlines into a single outline.")
         '''
         You are an expert in artificial intelligence who wants to write a overall survey about [TOPIC].\n\
         You are provided with a list of outlines as candidates below:\n\
@@ -151,6 +173,8 @@ class outlineWriter():
         return outline
     
     def generate_subsection_outlines(self, topic, section_outline, rag_num):
+        logging.info(f"generate_subsection_outlines: enrich with subsections: topic = {topic}, sections={section_outline}")
+
         '''
         You are an expert in artificial intelligence who wants to write a overall survey about [TOPIC].\n\
         You have created a overall outline below:\n\
@@ -205,12 +229,14 @@ class outlineWriter():
             prompts.append(prompt)
         self.input_token_usage += self.token_counter.num_tokens_from_list_string(prompts)
 
+        logging.info(f"entering batch chat api model") 
         sub_outlines = self.api_model.batch_chat(prompts, temperature=1)
 
         self.output_token_usage += self.token_counter.num_tokens_from_list_string(sub_outlines)
         return sub_outlines
 
     def edit_final_outline(self, outline):
+        logging.info(f"edit_final_outline, make it comprehensive and coherent with no repeated subsections: \n outline= {outline}")
         '''
         You are an expert in artificial intelligence who wants to write a overall survey about [TOPIC].\n\
         You have created a draft outline below:\n\
@@ -299,6 +325,8 @@ class outlineWriter():
         return paper_chunks, title_chunks
        
     def process_outlines(self, section_outline, sub_outlines):
+        logging.info(f"process_outlines: \n section_outline= {section_outline} \n sub_outlines {sub_outlines}")
+
         res = ''
         survey_title, survey_sections, survey_section_descriptions = self.extract_title_sections_descriptions(outline=section_outline)
         res += f'# {survey_title}\n\n'
