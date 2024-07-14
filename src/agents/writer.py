@@ -76,7 +76,6 @@ class subsectionWriter():
             thread = threading.Thread(target=self.write_subsection_with_reflection, args=(section_paper_texts[i], topic, outline, parsed_outline['sections'][i], parsed_outline['subsections'][i], parsed_outline['subsection_descriptions'][i], section_content, i, rag_num,str(subsection_len)))
             thread_l.append(thread)
             thread.start()
-            time.sleep(0.1)
 
         for thread in thread_l:
             thread.join()
